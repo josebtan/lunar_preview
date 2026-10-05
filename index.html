@@ -39,6 +39,7 @@ body.panel-open #hud{display:none}
 <button id="dice" class="ui" aria-label="Semilla aleatoria" title="Semilla aleatoria">🎲</button>
 <button id="gear" class="ui" aria-label="Ajustes">⚙</button>
 <div id="panel" class="ui">
+  <div class="row"><button id="mark" aria-pressed="false">🕳 Marcar entradas a túneles</button><button id="gotoEnt">➡ Ir a la más cercana</button></div>
   <label>Distancia <input id="dist" type="range" min="4" max="256" step="2"><output id="distO"></output></label>
   <div class="row presets" id="presets"><span style="opacity:.75;font-size:12px">Distancia:</span><button data-d="8">8</button><button data-d="24">24</button><button data-d="64">64</button><button data-d="128">128</button><button data-d="256">256</button></div>
   <label>Detalle cercano <input id="near" type="range" min="2" max="16" step="1"><output id="nearO"></output></label>

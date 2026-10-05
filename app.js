@@ -77,6 +77,7 @@
       w.onmessage = e => {
         const d = e.data, job = jobs.get(d.id); w.busy--; jobs.delete(d.id);
         if (!job) return pump();
+        if (job.ent) { entBusy = false; if (!d.error) setEntrances(d.list, job.x, job.z); return pump(); }
         pending.delete(job.key);
         if (d.error) { fail(d.error); return; }
         stats.done++; stats.ms += d.ms;
@@ -97,6 +98,42 @@
       if (t.level === 0) w.postMessage({ id, type: 'chunk', seed: S.seed, cx: t.a, cz: t.b });
       else { const sp = PV.lodSpec(t.level, t.a, t.b); w.postMessage({ id, type: 'lod', seed: S.seed, x0: sp.x0 - sp.step, z0: sp.z0 - sp.step, n: sp.n + 2, step: sp.step }); } // +1 muestra de margen por lado (normales sin costuras)
     }
+  }
+
+  // ---------- entradas a los túneles de lava ----------
+  // Tipo 0 = cenote con rampa (haz azul, alto); tipo 1 = tragaluz de rima (haz naranja). Las calcula el generador real.
+  const ent = { on: false, list: new Int32Array(0), x: NaN, z: NaN, goto: false }, entGroup = new THREE.Group();
+  let entBusy = false;
+  scene.add(entGroup);
+  const beamMat = [new THREE.MeshBasicMaterial({ color: 0x45d3ff, fog: false }), new THREE.MeshBasicMaterial({ color: 0xffa640, fog: false })];
+  const beamGeo = [new THREE.CylinderGeometry(0.9, 0.9, 1, 6), new THREE.CylinderGeometry(0.6, 0.6, 1, 6)];
+  function requestEntrances() {
+    if (entBusy || !workers.length) return;
+    let w = workers[0]; for (const c of workers) if (c.busy < w.busy) w = c;
+    const id = nextId++; entBusy = true; w.busy++; jobs.set(id, { ent: true, x: Math.round(pos.x), z: Math.round(pos.z) });
+    w.postMessage({ id, type: 'entrances', seed: S.seed, x: Math.round(pos.x), z: Math.round(pos.z), r: 650 });
+  }
+  function setEntrances(list, x, z) {
+    ent.list = list; ent.x = x; ent.z = z;
+    for (const m of [...entGroup.children]) entGroup.remove(m);
+    for (let i = 0; i < list.length; i += 4) {
+      const t = list[i], hgt = t === 0 ? 150 : 90, m = new THREE.Mesh(beamGeo[t], beamMat[t]);
+      m.scale.y = hgt; m.position.set(list[i + 1] + 0.5, list[i + 3] + hgt / 2, list[i + 2] + 0.5); entGroup.add(m);
+    }
+    entGroup.visible = ent.on;
+    if (ent.goto) { ent.goto = false; goNearest(); }
+  }
+  function nearestEntrance() {
+    let best = -1, bd = Infinity;
+    for (let i = 0; i < ent.list.length; i += 4) { const d = Math.hypot(ent.list[i + 1] - pos.x, ent.list[i + 2] - pos.z); if (d < bd) { bd = d; best = i; } }
+    return best < 0 ? null : { i: best, d: bd };
+  }
+  function goNearest() {
+    const n = nearestEntrance();
+    if (!n) { ent.goto = true; requestEntrances(); return; }
+    const l = ent.list, ex = l[n.i + 1], ez = l[n.i + 2], ey = l[n.i + 3];
+    // se coloca a 22 bloques de la entrada, mirándola desde arriba
+    pos.x = ex + 18; pos.z = ez + 18; pos.y = ey + 24; yaw = Math.atan2(pos.x - ex, pos.z - ez); pitch = -0.55; dirty = true;
   }
 
   // ---------- teselas ----------
@@ -171,8 +208,10 @@
   }
   $('gear').onclick = () => document.body.classList.toggle('panel-open', $('panel').classList.toggle('open'));
   for (const [id, k, f] of [['dist', 'dist', () => { applyFog(); }], ['near', 'near', () => {}], ['speed', 'speed', () => {}], ['sun', 'sun', setSun]]) $(id).oninput = e => { S[k] = +e.target.value; f(); syncUI(); dirty = true; };
+  $('mark').onclick = () => { ent.on = !ent.on; $('mark').setAttribute('aria-pressed', ent.on); entGroup.visible = ent.on; if (ent.on) requestEntrances(); };
+  $('gotoEnt').onclick = () => { goNearest(); };
   $('walk').onclick = () => { S.walk = !S.walk; syncUI(); }; $('fly').onclick = () => { S.walk = false; syncUI(); };
-  const setSeed = txt => { S.seed = PV.seedFromText(txt); resetWorld(); if (pos.y < 140) pos.y = 140; syncUI(); dirty = true; };
+  const setSeed = txt => { S.seed = PV.seedFromText(txt); resetWorld(); ent.list = new Int32Array(0); ent.x = NaN; for (const m of [...entGroup.children]) entGroup.remove(m); if (ent.on) requestEntrances(); if (pos.y < 140) pos.y = 140; syncUI(); dirty = true; };
   $('applySeed').onclick = () => { if ($('seed').value.trim()) setSeed($('seed').value); };
   const randomSeed = () => setSeed(PV.randomSeed());
   $('rndSeed').onclick = randomSeed; $('dice').onclick = randomSeed;
@@ -188,12 +227,13 @@
     const ccx = Math.floor(pos.x / 16), ccz = Math.floor(pos.z / 16);
     if (dirty || ccx !== lastCC[0] || ccz !== lastCC[1] || now - lastUpd > 1000) { update(ccx, ccz); lastCC = [ccx, ccz]; dirty = false; lastUpd = now; }
     syncLod(ccx, ccz);
+    if (ent.on && !entBusy && (!Number.isFinite(ent.x) || Math.hypot(pos.x - ent.x, pos.z - ent.z) > 280)) requestEntrances();
     const t0 = performance.now(); while (arrived.length && performance.now() - t0 < 5) { const a = arrived.shift(); if (a.job.epoch === epoch && !tiles.has(a.job.key) && keepKeys.has(a.job.key)) addMesh(a.job, a.d); }
     if (!shown) { let near = 0; for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) if (tiles.has('0:' + (ccx + dx) + ':' + (ccz + dz))) near++; if (near >= 9) { shown = true; bootEl.classList.add('hide'); } else bootEl.textContent = 'Generando terreno con el código del mod… (' + near + '/9)'; }
     renderer.render(scene, camera);
     if (now - lastHud > 250) { lastHud = now; let n0 = 0, n1 = 0, n2 = 0, n3 = 0; for (const k of tiles.keys()) { const l = k.charCodeAt(0) - 48; if (l === 0) n0++; else if (l === 1) n1++; else if (l === 2) n2++; else n3++; }
       const g = groundAt(pos.x, pos.z);
-      $('hud').textContent = `semilla ${S.seed}\nX ${pos.x.toFixed(0)}  Y ${pos.y.toFixed(0)}  Z ${pos.z.toFixed(0)}\n${Number.isFinite(g) ? 'suelo ' + g.toFixed(1) + '  ' : ''}${fps.toFixed(0)} fps\nchunks ${n0} · teselas ${n1}+${n2}+${n3} · cola ${queue.length + pending.size}` + (stats.done ? `\n${(stats.ms / stats.done).toFixed(0)} ms/pieza ×${NW}` : ''); $('hud').style.whiteSpace = 'pre'; }
+      $('hud').textContent = `semilla ${S.seed}${(() => { const n = ent.on ? nearestEntrance() : null; return n ? '\nentrada más cercana: ' + Math.round(n.d) + ' m (' + (ent.list[n.i] === 0 ? 'cenote' : 'tragaluz') + ')' : ''; })()}\nX ${pos.x.toFixed(0)}  Y ${pos.y.toFixed(0)}  Z ${pos.z.toFixed(0)}\n${Number.isFinite(g) ? 'suelo ' + g.toFixed(1) + '  ' : ''}${fps.toFixed(0)} fps\nchunks ${n0} · teselas ${n1}+${n2}+${n3} · cola ${queue.length + pending.size}` + (stats.done ? `\n${(stats.ms / stats.done).toFixed(0)} ms/pieza ×${NW}` : ''); $('hud').style.whiteSpace = 'pre'; }
     if (now - lastUrl > 1500) { lastUrl = now; history.replaceState(null, '', '#' + new URLSearchParams({ seed: S.seed, x: pos.x.toFixed(0), y: pos.y.toFixed(0), z: pos.z.toFixed(0), yaw: yaw.toFixed(2), pitch: pitch.toFixed(2), d: S.dist, n: S.near, v: Math.round(S.speed), s: Math.round(S.sun), w: S.walk ? 1 : 0 })); }
     requestAnimationFrame(frame);
   }
