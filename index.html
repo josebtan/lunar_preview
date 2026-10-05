@@ -11,12 +11,16 @@ html,body{margin:0;height:100%;background:#000;overflow:hidden;font:14px/1.35 sy
 canvas{display:block;width:100%;height:100%;touch-action:none}
 .ui{position:fixed;z-index:5}
 #hud{top:calc(8px + env(safe-area-inset-top,0px));left:calc(8px + env(safe-area-inset-left,0px));background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 9px;font:12px/1.35 ui-monospace,monospace;color:var(--fg);max-width:70vw;pointer-events:none}
-#gear{top:calc(8px + env(safe-area-inset-top,0px));right:calc(8px + env(safe-area-inset-right,0px));width:44px;height:44px;font-size:22px}
+#gear,#dice{top:calc(8px + env(safe-area-inset-top,0px));width:44px;height:44px;font-size:22px;padding:0}
+#gear{right:calc(8px + env(safe-area-inset-right,0px))}
+#dice{right:calc(60px + env(safe-area-inset-right,0px))}
+.presets button{padding:5px 8px;font-size:12px}
 button,input,select{font:inherit;color:var(--fg)}
 button{background:var(--btn);border:1px solid var(--line);border-radius:10px;padding:6px 10px}
 button:active,button[aria-pressed=true]{outline:2px solid var(--acc)}
 #panel{display:none;top:calc(58px + env(safe-area-inset-top,0px));right:calc(8px + env(safe-area-inset-right,0px));left:calc(8px + env(safe-area-inset-left,0px));max-height:calc(100% - 120px - env(safe-area-inset-top,0px));overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;max-width:440px;margin-left:auto}
 #panel.open{display:block}
+body.panel-open #hud{display:none}
 #panel label{display:grid;grid-template-columns:104px 1fr 62px;gap:8px;align-items:center;margin:7px 0}
 #panel output{text-align:right;opacity:.8;font-variant-numeric:tabular-nums;font-size:12px}
 #panel .row{display:flex;gap:6px;align-items:center;margin:7px 0;flex-wrap:wrap}
@@ -32,14 +36,16 @@ button:active,button[aria-pressed=true]{outline:2px solid var(--acc)}
 </style></head><body>
 <div id="boot" class="ui">Cargando el generador del mod…</div>
 <div id="hud" class="ui">—</div>
+<button id="dice" class="ui" aria-label="Semilla aleatoria" title="Semilla aleatoria">🎲</button>
 <button id="gear" class="ui" aria-label="Ajustes">⚙</button>
 <div id="panel" class="ui">
-  <label>Distancia <input id="dist" type="range" min="4" max="96" step="2"><output id="distO"></output></label>
-  <label>Detalle cercano <input id="near" type="range" min="2" max="10" step="1"><output id="nearO"></output></label>
+  <label>Distancia <input id="dist" type="range" min="4" max="256" step="2"><output id="distO"></output></label>
+  <div class="row presets" id="presets"><span style="opacity:.75;font-size:12px">Distancia:</span><button data-d="8">8</button><button data-d="24">24</button><button data-d="64">64</button><button data-d="128">128</button><button data-d="256">256</button></div>
+  <label>Detalle cercano <input id="near" type="range" min="2" max="16" step="1"><output id="nearO"></output></label>
   <label>Velocidad <input id="speed" type="range" min="4" max="400" step="2"><output id="speedO"></output></label>
   <label>Sol (altura) <input id="sun" type="range" min="3" max="90" step="1"><output id="sunO"></output></label>
   <div class="row"><button id="walk" aria-pressed="false">🚶 Caminar sobre el terreno</button><button id="fly">🕊 Volar</button></div>
-  <div class="row"><input id="seed" type="text" inputmode="text" placeholder="Semilla"><button id="applySeed">Generar</button><button id="rndSeed">🎲</button></div>
+  <div class="row"><input id="seed" type="text" inputmode="text" placeholder="Semilla" autocomplete="off" spellcheck="false"><button id="applySeed">Generar</button><button id="rndSeed">🎲</button></div>
   <div class="row"><input id="gx" type="number" placeholder="X"><input id="gz" type="number" placeholder="Z"><button id="go">Ir</button></div>
   <small>Es el generador real del mod compilado a JavaScript: lo que ves es lo que genera el juego (sin menas). Arrastra para mirar. Teclado: WASD, Espacio/Shift, Ctrl = turbo.</small>
 </div>

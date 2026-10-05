@@ -44,16 +44,19 @@
   }
 
   // Malla suave de baja resolución: rejilla (n+1)^2 de alturas h y "mare" m (0..1), muestreada cada `step` bloques.
-  function buildLod(h, m, n, step, offsetY, colHigh, colMare) {
-    const w = n + 1, pos = new Float32Array(w * w * 3), nor = new Float32Array(w * w * 3), col = new Float32Array(w * w * 3);
-    const at = (i, j) => h[Math.min(n, Math.max(0, i)) * w + Math.min(n, Math.max(0, j))];
+  // `margin`: muestras extra alrededor de la rejilla (h y m traen (n+1+2*margin)^2 valores). Con margen 1 las normales
+  // de los bordes usan a las vecinas y la iluminación no tiene costuras entre teselas contiguas.
+  function buildLod(h, m, n, step, offsetY, colHigh, colMare, margin) {
+    margin = margin || 0;
+    const w = n + 1, ww = n + 1 + 2 * margin, pos = new Float32Array(w * w * 3), nor = new Float32Array(w * w * 3), col = new Float32Array(w * w * 3);
+    const at = (i, j) => margin ? h[(i + margin) * ww + j + margin] : h[Math.min(n, Math.max(0, i)) * w + Math.min(n, Math.max(0, j))];
     for (let i = 0; i < w; i++) for (let j = 0; j < w; j++) {
-      const k = i * w + j;
-      pos[k * 3] = j * step; pos[k * 3 + 1] = h[k] - offsetY; pos[k * 3 + 2] = i * step;
+      const k = i * w + j, kk = (i + margin) * ww + j + margin;
+      pos[k * 3] = j * step; pos[k * 3 + 1] = h[kk] - offsetY; pos[k * 3 + 2] = i * step;
       const gx = (at(i, j + 1) - at(i, j - 1)) / (2 * step), gz = (at(i + 1, j) - at(i - 1, j)) / (2 * step);
       const len = Math.sqrt(gx * gx + gz * gz + 1);
       nor[k * 3] = -gx / len; nor[k * 3 + 1] = 1 / len; nor[k * 3 + 2] = -gz / len;
-      const t = Math.min(1, Math.max(0, m[k]));
+      const t = Math.min(1, Math.max(0, m[kk]));
       for (let c = 0; c < 3; c++) col[k * 3 + c] = colHigh[c] + (colMare[c] - colHigh[c]) * t;
     }
     const idx = new Uint16Array(n * n * 6);
@@ -68,9 +71,15 @@
   // Qué teselas hacen falta alrededor del chunk (ccx, ccz). Nivel 0: chunks de 16 con detalle completo hasta `near`;
   // nivel 1: teselas de 4x4 chunks (cada 4 bloques) hasta near+14; nivel 2: teselas de 16x16 chunks (cada 16) hasta D.
   // `extra` ensancha los radios (conjunto de retención, para no descargar y recargar en el borde).
+  // Radios (en chunks) de cada nivel: L0 hasta `near`; L1 hasta +14; L2 hasta +48 más; L3 hasta la distancia total D.
+  function radii(D, near) {
+    const R0 = Math.min(near, D), R1 = Math.min(D, R0 + 14), R2 = Math.min(D, R1 + 48);
+    return { R0, R1, R2, R3: D };
+  }
+
   function desired(ccx, ccz, D, near, extra) {
-    const R0 = Math.min(near, D), R1 = Math.min(D, R0 + 14);
-    const r0 = R0 + extra, r1 = R1 + extra, r2 = D + extra, out = [];
+    const { R0, R1, R2 } = radii(D, near);
+    const r0 = R0 + extra, r1 = R1 + extra, r2 = R2 + extra, r3 = D + extra, out = [];
     for (let dz = -r0; dz <= r0; dz++) for (let dx = -r0; dx <= r0; dx++) {
       out.push({ key: '0:' + (ccx + dx) + ':' + (ccz + dz), level: 0, a: ccx + dx, b: ccz + dz, prio: Math.max(Math.abs(dx), Math.abs(dz)) });
     }
@@ -86,13 +95,26 @@
     };
     // El límite interior no se ensancha (se estrecha) para que el conjunto de retención contenga siempre al deseado.
     if (R1 > R0) ring(1, 4, R0 - extra, r1);
-    if (D > R1) ring(2, 16, R1 - extra, r2);
+    if (R2 > R1) ring(2, 16, R1 - extra, r2);
+    if (D > R2) ring(3, 64, R2 - extra, r3);
     return out;
   }
 
-  // Parámetros de muestreo de una tesela de baja resolución.
+  // Parámetros de muestreo de una tesela de baja resolución: nivel 1 = 4x4 chunks cada 4 bloques; 2 = 16x16 cada 16;
+  // 3 = 64x64 cada 64. Todas son rejillas de 16x16 celdas.
   function lodSpec(level, a, b) {
-    return level === 1 ? { x0: a * 64, z0: b * 64, n: 16, step: 4, offset: 2 } : { x0: a * 256, z0: b * 256, n: 16, step: 16, offset: 7 };
+    const step = level === 1 ? 4 : level === 2 ? 16 : 64;
+    return { x0: a * 16 * step, z0: b * 16 * step, n: 16, step };
+  }
+
+  // Semilla aleatoria de hasta 18 dígitos (cabe en un long de Java y se conserva exacta como texto).
+  function randomSeed() {
+    const c = (typeof crypto !== 'undefined' && crypto.getRandomValues) ? crypto : null;
+    let v = 0n;
+    if (c) { const a = new Uint32Array(2); c.getRandomValues(a); v = (BigInt(a[0]) << 32n) | BigInt(a[1]); }
+    else v = BigInt(Math.floor(Math.random() * 2 ** 52)) * 1000n + BigInt(Math.floor(Math.random() * 1000));
+    v %= 1000000000000000000n; // < 1e18
+    return String(Math.random() < 0.5 ? -v : v);
   }
 
   // Semilla como Minecraft: número tal cual; cualquier otro texto, su String.hashCode() de Java.
@@ -104,6 +126,6 @@
     return String(h);
   }
 
-  const api = { tileOf, buildChunk, buildLod, desired, lodSpec, seedFromText };
+  const api = { tileOf, buildChunk, buildLod, desired, lodSpec, seedFromText, randomSeed, radii };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.PV = api;
 })(typeof self !== 'undefined' ? self : this);
